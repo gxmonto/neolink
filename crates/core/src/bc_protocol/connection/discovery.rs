@@ -162,6 +162,15 @@ impl Discoverer {
                                 log::debug!("Got non Discovery during discovery: {:?}", bcudp);
                             }
                             Some(Err(e)) => {
+                                // Windows reports an ICMP "port unreachable" for an earlier
+                                // send as ConnectionReset on receive (SIO_UDP_CONNRESET); the
+                                // socket is still usable, so keep reading.
+                                if let Error::Io(io) = &e {
+                                    if io.kind() == std::io::ErrorKind::ConnectionReset {
+                                        log::debug!("Ignoring ConnectionReset on discovery socket");
+                                        continue;
+                                    }
+                                }
                                 log::error!("Error on discovery socket: {:?}", e);
                                 let mut locked_sub = thread_subscriber.write().await;
                                 for (_, sub) in locked_sub.iter() {
