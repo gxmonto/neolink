@@ -13,11 +13,11 @@ jobs:
       - name: Install Windows deps
         run: |
           # Gstreamer
-          choco install -y --no-progress gstreamer --version=1.24.2
-          choco install -y --no-progress gstreamer-devel --version=1.24.2
-          $env:GSTREAMER_1_0_ROOT_MSVC_X86_64=$env:SYSTEMDRIVE + '\gstreamer\1.0\msvc_x86_64\'
-          if (-not (Test-Path -Path "$env:GSTREAMER_1_0_ROOT_MSVC_X86_64" -PathType Container)) {
-            $env:GSTREAMER_1_0_ROOT_MSVC_X86_64='D:\\gstreamer\1.0\msvc_x86_64\'
+          choco install -y --no-progress gstreamer --version=1.26.9
+          choco install -y --no-progress gstreamer-devel --version=1.26.9
+          $env:GSTREAMER_1_0_ROOT_MSVC_X86_64 = ''
+          foreach ($c in @("$env:ProgramFiles\gstreamer\1.0\msvc_x86_64\", "$env:SYSTEMDRIVE\gstreamer\1.0\msvc_x86_64\", 'D:\gstreamer\1.0\msvc_x86_64\')) {
+            if (Test-Path -Path $c -PathType Container) { $env:GSTREAMER_1_0_ROOT_MSVC_X86_64 = $c; break }
           }
           echo "GSTREAMER_1_0_ROOT_MSVC_X86_64=$env:GSTREAMER_1_0_ROOT_MSVC_X86_64"
 
