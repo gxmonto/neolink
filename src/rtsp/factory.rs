@@ -461,16 +461,9 @@ fn send_to_appsrc(
         }
         Err(e) => Err(anyhow!("Error in streaming: {e:?}")),
     }?;
-    // Check if we need to pause
-    if appsrc.current_level_bytes() >= appsrc.max_bytes() * 2 / 3
-        && matches!(appsrc.current_state(), gstreamer::State::Paused)
-    {
-        appsrc.set_state(gstreamer::State::Playing).unwrap();
-    } else if appsrc.current_level_bytes() <= appsrc.max_bytes() / 3
-        && matches!(appsrc.current_state(), gstreamer::State::Playing)
-    {
-        appsrc.set_state(gstreamer::State::Paused).unwrap();
-    }
+    // No pause/resume buffering here: on a slow link (NVR channels sharing a relay, ~40 kB/s each) the source stayed
+    // paused until 2/3 of a buffer sized for 4 Mbit/s had arrived (~17 s), then drained at once and paused again, so
+    // players saw long gaps and reconnected. A live source just keeps flowing; overflow is dropped above.
     Ok(())
 }
 fn check_live(app: &AppSrc) -> Result<()> {
