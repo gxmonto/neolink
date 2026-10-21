@@ -327,7 +327,18 @@ impl Poller {
                                                 &msg_id
                                             );
                                         }
-                                        let _ = sender.send(Ok(response)).await;
+                                        // Never wait here: this loop serves every subscriber of the connection, and on a shared
+                                        // NVR login one stalled viewer (a stream whose reader went away) would freeze every channel,
+                                        // pings included. A full queue drops this message for that subscriber only.
+                                        match sender.try_send(Ok(response)) {
+                                            Ok(()) => {}
+                                            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                                debug!("Subscriber queue full for {} (ID: {}), message dropped", &msg_num, &msg_id);
+                                            }
+                                            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                                occ.remove(&Some(msg_num));
+                                            }
+                                        }
                                     } else {
                                         trace!(
                                             "Ignoring uninteresting message id {} (number: {})",
@@ -350,7 +361,7 @@ impl Poller {
                         Err(e) => {
                             for sub in self.subscribers.num.values() {
                                 for sender in sub.values() {
-                                    let _ = sender.send(Err(e.clone())).await;
+                                    let _ = sender.try_send(Err(e.clone()));
                                 }
                             }
                             self.subscribers.num.clear();
