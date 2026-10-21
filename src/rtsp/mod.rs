@@ -260,24 +260,31 @@ async fn camera_main(camera: NeoInstance, rtsp: &NeoRtspServer) -> Result<()> {
     set.spawn(async move {
         let mut i = IntervalStream::new(interval(Duration::from_secs(15)));
         while i.next().await.is_some() {
-            let stream_info = later_camera
+            let new_supported_streams = match later_camera
                 .run_passive_task(|cam| Box::pin(async move { Ok(cam.get_stream_info().await?) }))
-                .await?;
-
-            let new_supported_streams = stream_info
-                .stream_infos
-                .iter()
-                .flat_map(|stream_info| stream_info.encode_tables.clone())
-                .flat_map(|encode| match encode.name.as_str() {
-                    "mainStream" => Some(StreamKind::Main),
-                    "subStream" => Some(StreamKind::Sub),
-                    "externStream" => Some(StreamKind::Extern),
-                    new_stream_name => {
-                        log::debug!("New stream name {}", new_stream_name);
-                        None
-                    }
-                })
-                .collect::<HashSet<_>>();
+                .await
+            {
+                Ok(stream_info) => stream_info
+                    .stream_infos
+                    .iter()
+                    .flat_map(|stream_info| stream_info.encode_tables.clone())
+                    .flat_map(|encode| match encode.name.as_str() {
+                        "mainStream" => Some(StreamKind::Main),
+                        "subStream" => Some(StreamKind::Sub),
+                        "externStream" => Some(StreamKind::Extern),
+                        new_stream_name => {
+                            log::debug!("New stream name {}", new_stream_name);
+                            None
+                        }
+                    })
+                    .collect::<HashSet<_>>(),
+                Err(e) => {
+                    // Some NVR firmwares (RLN16-410 v3.5.1.356) answer StreamInfoList (msg 146) with code 300:
+                    // assume main + sub; the codec is detected from the first frames anyway.
+                    log::debug!("Stream info unavailable ({e:?}); assuming main and sub streams");
+                    HashSet::from([StreamKind::Main, StreamKind::Sub])
+                }
+            };
             supported_streams_tx.send_if_modified(|old| {
                 if *old != new_supported_streams {
                     *old = new_supported_streams;

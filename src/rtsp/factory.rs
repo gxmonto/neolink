@@ -82,7 +82,12 @@ impl StreamConfig {
                     }
                 })
             })
-            .await?;
+            .await
+            .unwrap_or_else(|e| {
+                // StreamInfoList refused by the device (see rtsp/mod.rs): no tables, codec from the frames
+                log::debug!("Stream info unavailable for {name:?} ({e:?}); using defaults");
+                ([0, 0], 0, 0, vec![], vec![])
+            });
 
         Ok(StreamConfig {
             resolution,
