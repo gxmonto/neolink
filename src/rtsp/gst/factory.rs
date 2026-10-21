@@ -39,7 +39,10 @@ impl NeoMediaFactory {
         factory.set_eos_shutdown(false);
         factory.set_stop_on_disconnect(false);
         // factory.set_publish_clock_mode(gstreamer_rtsp_server::RTSPPublishClockMode::Clock);
-        factory.set_suspend_mode(gstreamer_rtsp_server::RTSPSuspendMode::Reset);
+        // None, not Reset: the camera source is live, so tearing the media down between SETUP and PLAY and
+        // re-prerolling it from scratch hangs when the stream resumes mid-GOP (pre-IDR P-frames), giving
+        // "unsuspend failed" / 503 on PLAY (e.g. RLN16-410 v3.5.1 over the relay). None keeps it running.
+        factory.set_suspend_mode(gstreamer_rtsp_server::RTSPSuspendMode::None);
         factory.set_launch("videotestsrc pattern=\"snow\" ! video/x-raw,width=896,height=512,framerate=25/1 ! textoverlay name=\"inittextoverlay\" text=\"Stream not Ready\" valignment=top halignment=left font-desc=\"Sans, 32\" ! jpegenc ! rtpjpegpay name=pay0");
         factory.set_transport_mode(RTSPTransportMode::PLAY);
         factory
