@@ -309,6 +309,7 @@ struct UdpPayloadInner {
     /// This `resend_interval` controls how ofen we do this
     resend_interval: Interval,
     ack_latency: AckLatency,
+    stats: (u64, u64, u64, u64, Instant), // rx, duplicates, out-of-order, bytes, since
     cancel: CancellationToken,
     set: JoinSet<Result<()>>,
 }
@@ -473,6 +474,7 @@ impl UdpPayloadInner {
             recieved: Default::default(),
             resend_interval: interval(Duration::from_millis(500)), // Offical Client does resend every 500ms
             ack_latency: Default::default(),
+            stats: (0, 0, 0, 0, Instant::now()),
             cancel,
             set,
         }
@@ -536,6 +538,22 @@ impl UdpPayloadInner {
                         BcUdp::Data(data)  => {
                             if data.connection_id == self.client_id {
                                 let packet_id = data.packet_id;
+                                self.stats.0 += 1;
+                                self.stats.3 += data.payload.len() as u64;
+                                if packet_id < self.packets_want || self.recieved.contains_key(&packet_id) {
+                                    self.stats.1 += 1;
+                                } else if packet_id > self.packets_want {
+                                    self.stats.2 += 1;
+                                }
+                                if self.stats.4.elapsed() > Duration::from_secs(5) {
+                                    let secs = self.stats.4.elapsed().as_secs_f64();
+                                    log::debug!(
+                                        "udp stats: {:.0} pkt/s, {:.0} kB/s, dup {}, out-of-order {}, waiting {}, unacked sent {}, reported latency {}",
+                                        self.stats.0 as f64 / secs, self.stats.3 as f64 / secs / 1024.0, self.stats.1, self.stats.2,
+                                        self.recieved.len(), self.sent.len(), self.ack_latency.get_value()
+                                    );
+                                    self.stats = (0, 0, 0, 0, Instant::now());
+                                }
                                 if packet_id >= self.packets_want {
                                     // error!("packets_want: {}", this.packets_want);
                                     self.recieved.insert(packet_id, data.payload);
@@ -773,6 +791,9 @@ async fn connect() -> Result<UdpSocket> {
         .map(|&port| SocketAddr::from(([0, 0, 0, 0], port)))
         .collect();
     let socket = UdpSocket::bind(&addrs[..]).await?;
+    // Relay data arrives in bursts (more so through a VPN); the small default receive buffer dropped packets,
+    // and every drop waits for a retransmit while the whole in-order stream stalls behind it.
+    let _ = socket2::SockRef::from(&socket).set_recv_buffer_size(4 * 1024 * 1024);
 
     Ok(socket)
 }
@@ -791,6 +812,9 @@ async fn connect_try_port(port: u16) -> Result<UdpSocket> {
         .map(|&port| SocketAddr::from(([0, 0, 0, 0], port)))
         .collect();
     let socket = UdpSocket::bind(&addrs[..]).await?;
+    // Relay data arrives in bursts (more so through a VPN); the small default receive buffer dropped packets,
+    // and every drop waits for a retransmit while the whole in-order stream stalls behind it.
+    let _ = socket2::SockRef::from(&socket).set_recv_buffer_size(4 * 1024 * 1024);
 
     Ok(socket)
 }

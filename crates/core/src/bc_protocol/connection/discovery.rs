@@ -1295,6 +1295,8 @@ async fn connect() -> Result<UdpSocket> {
         .collect();
     let socket = UdpSocket::bind(&addrs[..]).await?;
     socket.set_broadcast(true)?;
+    // the discovery socket becomes the relay data socket: give it room for bursts (see udpsource.rs)
+    let _ = socket2::SockRef::from(&socket).set_recv_buffer_size(4 * 1024 * 1024);
 
     Ok(socket)
 }
