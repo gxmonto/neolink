@@ -269,7 +269,23 @@ pub(super) async fn make_factory(
                             }
 
                             log::trace!("{name}::{stream}: Sending new frames");
+                            // A torn-down client media leaves its appsrc in NULL/READY, where pushes only report
+                            // "flushing" (treated as a full buffer), so this loop never ended and the camera kept
+                            // streaming to nobody. Stop once the source has been dead for a while; dropping media_rx
+                            // ends the camera stream (stop_video).
+                            let mut dead_since: Option<std::time::Instant> = None;
                             while let Some(data) = media_rx.blocking_recv() {
+                                let dead = vid_src.as_ref().or(aud_src.as_ref()).map(|app| {
+                                    matches!(app.current_state(), gstreamer::State::Null | gstreamer::State::Ready)
+                                }).unwrap_or(false);
+                                if dead {
+                                    if dead_since.get_or_insert_with(std::time::Instant::now).elapsed() > std::time::Duration::from_secs(10) {
+                                        log::debug!("{name}::{stream}: client media gone, stopping its camera stream");
+                                        break;
+                                    }
+                                } else {
+                                    dead_since = None;
+                                }
                                 let r = send_to_sources(
                                     data,
                                     &mut pools,
