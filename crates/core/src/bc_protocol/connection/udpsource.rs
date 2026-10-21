@@ -408,7 +408,10 @@ impl UdpPayloadInner {
 
         // Queue up ack packets
         let ack_cancel = cancel.clone();
-        let mut ack_interval = interval(Duration::from_millis(10)); // Offical Client does ack every 10ms
+        // Offical Client does ack every 10ms. NEOLINK_ACK_MS overrides it (throughput experiments: the camera's send
+        // rate looked ack-clocked over a relay).
+        let ack_ms = std::env::var("NEOLINK_ACK_MS").ok().and_then(|v| v.parse::<u64>().ok()).filter(|v| *v > 0).unwrap_or(10);
+        let mut ack_interval = interval(Duration::from_millis(ack_ms));
         ack_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let (ack_tx, ack_rx) = watch(UdpAck::empty(camera_id));
         let ack_socket_in_tx = socket_in_tx.clone();
