@@ -612,7 +612,11 @@ impl UdpPayloadInner {
                 connection_id: self.camera_id,
                 packet_id: first_missing - 1, // Last we actually have is first_missing - 1
                 group_id: 0,
-                maybe_latency: std::env::var("NEOLINK_ACK_LATENCY").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or_else(|| self.ack_latency.get_value()),
+                // The camera sizes its send window from this value. Reporting the measured ack interval (~20 ms)
+                // capped a relayed connection at ~90 kB/s (10 NVR channels at ~5 fps, 1 at 10 fps); 1_000_000
+                // gave every channel its full rate (~300 kB/s for 10 sub streams) over the Reolink relay + a VPN.
+                // NEOLINK_ACK_LATENCY overrides it.
+                maybe_latency: std::env::var("NEOLINK_ACK_LATENCY").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(1_000_000),
                 payload: missing_ids,
             }
         } else {
