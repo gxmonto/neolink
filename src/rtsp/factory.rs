@@ -211,6 +211,11 @@ pub(super) async fn make_factory(
                                 AnyResult::Ok(Some(src))
                             }
                             None => {
+                                // no video from the camera (e.g. an NVR slot whose camera is offline): without a splash
+                                // the client gets an error instead of a test pattern it would mistake for video
+                                if !config.use_splash {
+                                    return Err(anyhow!("{name}::{stream}: no video from the camera"));
+                                }
                                 build_unknown(&element, &config.splash_pattern.to_string())?;
                                 AnyResult::Ok(None)
                             }
