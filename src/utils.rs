@@ -114,6 +114,15 @@ type SharedList = std::sync::Arc<tokio::sync::Mutex<Vec<std::sync::Weak<BcCamera
 static SHARED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, SharedList>>> =
     std::sync::LazyLock::new(Default::default);
 
+// Last successful liveness check of a device's shared connection: channels opening together reuse it instead of
+// each waiting (behind the mutex) for its own relay round trip.
+static LAST_OK: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn shared_key(config: &CameraConfig) -> String {
+    format!("{:?}|{:?}|{}", config.camera_uid, config.camera_addr, config.username)
+}
+
 fn shared_list(config: &CameraConfig) -> SharedList {
     let key = format!("{:?}|{:?}|{}", config.camera_uid, config.camera_addr, config.username);
     SHARED.lock().unwrap().entry(key).or_default().clone()
@@ -127,12 +136,20 @@ pub(crate) async fn connect_and_login_shared(
     let mut list = list.lock().await; // serialises the first connect so channels do not race to log in
     list.retain(|w| w.strong_count() > 0);
     let alive: Vec<_> = list.iter().filter_map(|w| w.upgrade()).collect();
+    let key = shared_key(camera_config);
+    let fresh = LAST_OK
+        .lock()
+        .unwrap()
+        .get(&key)
+        .map(|t| t.elapsed() < std::time::Duration::from_secs(15))
+        .unwrap_or(false);
     for base in alive {
-        let ok = matches!(
+        let ok = fresh || matches!(
             tokio::time::timeout(tokio::time::Duration::from_secs(5), base.get_linktype()).await,
             Ok(Ok(_)) | Ok(Err(neolink_core::Error::UnintelligibleReply { .. }))
         );
         if ok {
+            LAST_OK.lock().unwrap().insert(key.clone(), std::time::Instant::now());
             let cam = std::sync::Arc::new(base.sibling(camera_config.channel_id).await);
             list.push(std::sync::Arc::downgrade(&cam));
             info!("{}: Connected and logged in (shared login)", camera_config.name);
@@ -140,6 +157,7 @@ pub(crate) async fn connect_and_login_shared(
         }
     }
     let cam = std::sync::Arc::new(connect_and_login(camera_config).await?);
+    LAST_OK.lock().unwrap().insert(key, std::time::Instant::now());
     list.push(std::sync::Arc::downgrade(&cam));
     Ok(cam)
 }
