@@ -198,21 +198,33 @@ fn bc_modern_msg<'a>(
                         .unwrap_or("Not Text".to_string())
                 );
             }
-            let xml = BcXml::try_parse(processed_payload_buf.as_slice()).map_err(|e| {
-                error!("header.msg_id: {}", header.msg_id);
-                error!(
-                    "processed_payload_buf: {:X?}::{:?}",
-                    processed_payload_buf,
-                    std::str::from_utf8(&processed_payload_buf)
-                );
-                log::error!("e: {:?}", e);
-                Err::Error(make_error(
-                    buf,
-                    "Unable to parse Payload XML",
-                    ErrorKind::MapRes,
-                ))
-            })?;
-            payload = Some(BcPayloads::BcXml(xml));
+            payload = match BcXml::try_parse(processed_payload_buf.as_slice()) {
+                Ok(xml) => Some(BcPayloads::BcXml(xml)),
+                Err(e) if header.msg_id != MSG_ID_LOGIN => {
+                    // Pushes (motion, msg 33, on RLN16-410 v3.5.1) can arrive AES-encrypted while the login handshake is
+                    // still at BcEncrypt: keep the connection and hand the undecodable payload over as binary.
+                    log::debug!(
+                        "Unparsable XML payload for msg_id {} ({:?}); passing it through as binary",
+                        header.msg_id,
+                        e
+                    );
+                    Some(BcPayloads::Binary(payload_buf.to_vec()))
+                }
+                Err(e) => {
+                    error!("header.msg_id: {}", header.msg_id);
+                    error!(
+                        "processed_payload_buf: {:X?}::{:?}",
+                        processed_payload_buf,
+                        std::str::from_utf8(&processed_payload_buf)
+                    );
+                    log::error!("e: {:?}", e);
+                    return ::std::result::Result::Err(Err::Error(make_error(
+                        buf,
+                        "Unable to parse Payload XML",
+                        ErrorKind::MapRes,
+                    )));
+                }
+            };
         }
     } else {
         payload = None;
