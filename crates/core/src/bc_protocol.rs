@@ -73,6 +73,9 @@ pub struct BcCamera {
     connection: Arc<BcConnection>,
     logged_in: AtomicBool,
     message_num: Arc<AtomicU16>, // shared by sibling handles on the same connection
+    /// Generation of the latest video start per preview handle (shared by siblings): a stream that ends after a newer
+    /// one with the same handle started must not send VIDEO_STOP, which would stop the newer stream.
+    pub(crate) video_gen: Arc<std::sync::Mutex<std::collections::HashMap<u32, u64>>>,
     // Certain commands such as logout require the username/pass in plain text.... why....???
     credentials: Credentials,
     abilities: RwLock<HashMap<String, ReadKind>>,
@@ -358,6 +361,7 @@ impl BcCamera {
         let me = Self {
             connection: Arc::new(conn),
             message_num: Arc::new(AtomicU16::new(0)),
+            video_gen: Default::default(),
             channel_id: options.channel_id,
             logged_in: AtomicBool::new(false),
             credentials: Credentials::new(username, passwd),
@@ -380,6 +384,7 @@ impl BcCamera {
             connection: self.connection.clone(),
             logged_in: AtomicBool::new(self.logged_in.load(Ordering::Relaxed)),
             message_num: self.message_num.clone(),
+            video_gen: self.video_gen.clone(),
             credentials: self.credentials.clone(),
             abilities: RwLock::new(abilities),
             cancel: CancellationToken::new(),

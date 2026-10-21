@@ -128,6 +128,7 @@ impl BcCamera {
         }
         let (tx, rx) = channel(buffer_size);
         let channel_id = self.channel_id;
+        let video_gen = self.video_gen.clone();
 
         let handle = task::spawn(async move {
             let mut sub_video = connection.subscribe(MSG_ID_VIDEO, msg_num).await?;
@@ -190,6 +191,12 @@ impl BcCamera {
                 },
             );
 
+            let my_gen = {
+                let mut gens = video_gen.lock().unwrap();
+                let g = gens.entry(handle).or_insert(0);
+                *g += 1;
+                *g
+            };
             sub_video.send(start_video).await?;
 
             let msg = sub_video.recv().await?;
@@ -220,6 +227,10 @@ impl BcCamera {
                 }
             }
 
+            // a newer stream with the same handle (same channel and stream type) took over: stopping now would stop it
+            if video_gen.lock().unwrap().get(&handle).copied() != Some(my_gen) {
+                return Ok(());
+            }
             let stop_video = Bc::new_from_xml(
                 BcMeta {
                     msg_id: MSG_ID_VIDEO_STOP,
