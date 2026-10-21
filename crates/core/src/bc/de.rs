@@ -236,7 +236,8 @@ fn bc_modern_msg<'a>(
 fn bc_header(buf: &[u8]) -> IResult<&[u8], BcHeader> {
     let (buf, _magic) = error_context(
         "Magic invalid",
-        verify(le_u32, |x| *x == MAGIC_HEADER || *x == MAGIC_HEADER_REV),
+        // RLN16-410 v3.5.1 sends pushes (msg 33 motion) with a zeroed magic through the relay
+        verify(le_u32, |x| *x == MAGIC_HEADER || *x == MAGIC_HEADER_REV || *x == 0),
     )(buf)?;
     let (buf, msg_id) = error_context("MsgID missing", le_u32)(buf)?;
     let (buf, body_len) = error_context("BodyLen missing", le_u32)(buf)?;
