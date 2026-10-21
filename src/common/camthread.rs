@@ -45,11 +45,14 @@ impl NeoCamThread {
         let camera = connect_and_login_shared(config).await?;
         log::trace!("  - Connected");
 
-        sleep(Duration::from_secs(2)).await; // Delay a little since some calls will error if camera is waking up
-        if let Err(e) = update_camera_time(&camera, &name, config.update_time).await {
-            log::warn!("Could not set camera time, (perhaps missing on this camera of your login in not an admin): {e:?}");
+        // a channel joining an NVR's running shared login needs no wake-up delay (it cost ~4 s per tile)
+        if !connection_shared(config, &camera).await {
+            sleep(Duration::from_secs(2)).await; // Delay a little since some calls will error if camera is waking up
+            if let Err(e) = update_camera_time(&camera, &name, config.update_time).await {
+                log::warn!("Could not set camera time, (perhaps missing on this camera of your login in not an admin): {e:?}");
+            }
+            sleep(Duration::from_secs(2)).await; // Delay a little since some calls will error if camera is waking up
         }
-        sleep(Duration::from_secs(2)).await; // Delay a little since some calls will error if camera is waking up
 
         self.camera_watch.send_replace(Arc::downgrade(&camera));
 
