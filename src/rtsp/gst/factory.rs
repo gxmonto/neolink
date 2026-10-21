@@ -37,7 +37,9 @@ impl NeoMediaFactory {
         let factory = Object::new::<NeoMediaFactory>();
         factory.set_shared(false);
         factory.set_eos_shutdown(false);
-        factory.set_stop_on_disconnect(false);
+        // true: with suspend-mode None (below) a media whose client went away would otherwise keep pulling the
+        // camera stream forever; every player reconnect then added another relay stream (bandwidth + memory pile-up)
+        factory.set_stop_on_disconnect(true);
         // factory.set_publish_clock_mode(gstreamer_rtsp_server::RTSPPublishClockMode::Clock);
         // None, not Reset: the camera source is live, so tearing the media down between SETUP and PLAY and
         // re-prerolling it from scratch hangs when the stream resumes mid-GOP (pre-IDR P-frames), giving
