@@ -194,6 +194,10 @@ impl NeoCam {
             }
         });
 
+        // idle_disconnect: background work (startup report, uid, motion) must not log the camera in by itself;
+        // only a real user (an RTSP client) should. NVR channels each hold a session and recorders cap them (~10).
+        let idle = config.idle_disconnect;
+
         // This thread just does a one time report on camera info
         let report_instance = instance.subscribe().await?;
         let report_cancel = me.cancel.clone();
@@ -204,19 +208,19 @@ impl NeoCam {
                     AnyResult::Ok(())
                 }
                 v = async {
-                    let version = report_instance.run_task(|cam| Box::pin(
-                        async move {
-                            Ok(cam.version().await?)
-                        }
-                    )).await?;
+                    let version = if idle {
+                        report_instance.run_passive_task(|cam| Box::pin(async move { Ok(cam.version().await?) })).await?
+                    } else {
+                        report_instance.run_task(|cam| Box::pin(async move { Ok(cam.version().await?) })).await?
+                    };
                     log::info!("{}: Model {}", report_name, version.model.unwrap_or("Undeclared".to_string()));
                     log::info!("{}: Firmware Version {}", report_name, version.firmwareVersion);
 
-                    let stream_info = report_instance.run_task(|cam| Box::pin(
-                        async move {
-                            Ok(cam.get_stream_info().await?)
-                        }
-                    )).await?;
+                    let stream_info = if idle {
+                        report_instance.run_passive_task(|cam| Box::pin(async move { Ok(cam.get_stream_info().await?) })).await?
+                    } else {
+                        report_instance.run_task(|cam| Box::pin(async move { Ok(cam.get_stream_info().await?) })).await?
+                    };
                     let mut supported_streams = vec![];
                     for encode in stream_info.stream_infos.iter().flat_map(|stream_info| stream_info.encode_tables.clone()) {
                         supported_streams.push(std::format!("    {}: {}x{}", encode.name, encode.resolution.width, encode.resolution.height));
@@ -238,10 +242,11 @@ impl NeoCam {
                     AnyResult::Ok(())
                 },
                 v = async {
-                    let uid = uid_instance.run_task(|cam| Box::pin(async move {
-                        let uid = cam.uid().await?;
-                        Ok(uid)
-                    })).await?;
+                    let uid = if idle {
+                        uid_instance.run_passive_task(|cam| Box::pin(async move { Ok(cam.uid().await?) })).await?
+                    } else {
+                        uid_instance.run_task(|cam| Box::pin(async move { Ok(cam.uid().await?) })).await?
+                    };
                     uid_tx.send_replace(Some(uid));
                     AnyResult::Ok(())
                 } => v,
@@ -310,6 +315,7 @@ impl NeoCam {
                     AnyResult::Ok(())
                 },
                 v = async {
+                    if idle { return AnyResult::Ok(()); } // motion must not log an idle channel in
                     let mut md = md_permit_instance.motion().await.with_context(|| "Unable to acquire motion watcher")?;
                     loop{
                         md.wait_for(|md| matches!(md, MdState::Start(_))).await.with_context(|| "MD Watcher lost")?;
