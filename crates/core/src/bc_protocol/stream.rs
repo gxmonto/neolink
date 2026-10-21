@@ -155,11 +155,13 @@ impl BcCamera {
             //  - mainStream is 0
             //  - subStream is 256
             //  - externStram is 1024
+            // + channel: an NVR shares one login between channels, and a preview with an already used handle
+            // replaces that stream (only the last opened channel kept playing). Channel 0 keeps the classic values.
             let handle = match stream {
                 StreamKind::Main => 0,
                 StreamKind::Sub => 256,
                 StreamKind::Extern => 1024,
-            };
+            } + channel_id as u32;
 
             let stream_name = match stream {
                 StreamKind::Main => "mainStream",
@@ -309,11 +311,13 @@ impl BcCamera {
         //  - mainStream is 0
         //  - subStream is 256
         //  - externStram is 1024
+        // + channel: an NVR shares one login between channels, and a preview with an already used handle
+        // replaces that stream (only the last opened channel kept playing). Channel 0 keeps the classic values.
         let handle = match stream {
             StreamKind::Main => 0,
             StreamKind::Sub => 256,
             StreamKind::Extern => 1024,
-        };
+        } + self.channel_id as u32;
 
         let stop_video = Bc::new_from_xml(
             BcMeta {
