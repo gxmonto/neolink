@@ -86,7 +86,8 @@ impl StreamConfig {
             .unwrap_or_else(|e| {
                 // StreamInfoList refused by the device (see rtsp/mod.rs): no tables, codec from the frames
                 log::debug!("Stream info unavailable for {name:?} ({e:?}); using defaults");
-                ([0, 0], 0, 0, vec![], vec![])
+                ([0, 0], 4096 * 1024, 15, vec![], vec![]) // fps/bitrate are divisors below; the frames update them
+
             });
 
         Ok(StreamConfig {
@@ -102,7 +103,9 @@ impl StreamConfig {
 
     fn update_fps(&mut self, fps: u32) {
         let new_fps = self.fps_table.get(fps as usize).copied().unwrap_or(fps);
-        self.fps = new_fps;
+        if new_fps > 0 {
+            self.fps = new_fps;
+        }
     }
     #[allow(dead_code)]
     fn update_bitrate(&mut self, bitrate: u32) {
