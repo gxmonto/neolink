@@ -76,6 +76,12 @@ impl NeoRtspServer {
         let server = self;
         server.set_address(bind_addr);
         server.set_service(&format!("{}", bind_port));
+        // GStreamer serves all RTSP clients on ONE thread by default (max-threads 1): a client whose media waits
+        // for its camera then blocks every other client. With many NVR channels opened at once that wedged the
+        // whole server, so give clients their own threads.
+        let pool = gstreamer_rtsp_server::RTSPThreadPool::new();
+        pool.set_max_threads(-1);
+        server.set_thread_pool(Some(&pool));
         // Attach server to default Glib context
         let _ = server.attach(None);
         let main_loop = Arc::new(MainLoop::new(None, false));
