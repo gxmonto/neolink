@@ -612,7 +612,7 @@ impl UdpPayloadInner {
                 connection_id: self.camera_id,
                 packet_id: first_missing - 1, // Last we actually have is first_missing - 1
                 group_id: 0,
-                maybe_latency: self.ack_latency.get_value(),
+                maybe_latency: std::env::var("NEOLINK_ACK_LATENCY").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or_else(|| self.ack_latency.get_value()),
                 payload: missing_ids,
             }
         } else {
