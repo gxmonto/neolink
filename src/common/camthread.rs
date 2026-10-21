@@ -5,7 +5,11 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{config::CameraConfig, utils::connect_and_login, AnyResult};
+use crate::{
+    config::CameraConfig,
+    utils::{connect_and_login_shared, connection_shared},
+    AnyResult,
+};
 use neolink_core::bc_protocol::BcCamera;
 
 #[derive(Eq, PartialEq, Copy, Clone)]
@@ -38,7 +42,7 @@ impl NeoCamThread {
     async fn run_camera(&mut self, config: &CameraConfig) -> AnyResult<()> {
         let name = config.name.clone();
         log::trace!("Attempting connection with config: {config:?}");
-        let camera = Arc::new(connect_and_login(config).await?);
+        let camera = connect_and_login_shared(config).await?;
         log::trace!("  - Connected");
 
         sleep(Duration::from_secs(2)).await; // Delay a little since some calls will error if camera is waking up
@@ -94,8 +98,11 @@ impl NeoCamThread {
             } => v,
         }?;
 
-        let _ = camera.logout().await;
-        let _ = camera.shutdown().await;
+        // other channels of the same NVR may still use this login
+        if !connection_shared(config, &camera).await {
+            let _ = camera.logout().await;
+            let _ = camera.shutdown().await;
+        }
 
         Ok(())
     }

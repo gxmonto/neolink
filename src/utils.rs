@@ -109,6 +109,51 @@ impl AddressOrUid {
     }
 }
 
+type SharedList = std::sync::Arc<tokio::sync::Mutex<Vec<std::sync::Weak<BcCamera>>>>;
+// Live camera handles per device (uid/address + user): later channels of the same NVR reuse the first login.
+static SHARED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, SharedList>>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn shared_list(config: &CameraConfig) -> SharedList {
+    let key = format!("{:?}|{:?}|{}", config.camera_uid, config.camera_addr, config.username);
+    SHARED.lock().unwrap().entry(key).or_default().clone()
+}
+
+/// Like [connect_and_login] but shares one connection/login between all channels of the same device.
+pub(crate) async fn connect_and_login_shared(
+    camera_config: &CameraConfig,
+) -> Result<std::sync::Arc<BcCamera>> {
+    let list = shared_list(camera_config);
+    let mut list = list.lock().await; // serialises the first connect so channels do not race to log in
+    list.retain(|w| w.strong_count() > 0);
+    let alive: Vec<_> = list.iter().filter_map(|w| w.upgrade()).collect();
+    for base in alive {
+        let ok = matches!(
+            tokio::time::timeout(tokio::time::Duration::from_secs(5), base.get_linktype()).await,
+            Ok(Ok(_)) | Ok(Err(neolink_core::Error::UnintelligibleReply { .. }))
+        );
+        if ok {
+            let cam = std::sync::Arc::new(base.sibling(camera_config.channel_id).await);
+            list.push(std::sync::Arc::downgrade(&cam));
+            info!("{}: Connected and logged in (shared login)", camera_config.name);
+            return Ok(cam);
+        }
+    }
+    let cam = std::sync::Arc::new(connect_and_login(camera_config).await?);
+    list.push(std::sync::Arc::downgrade(&cam));
+    Ok(cam)
+}
+
+/// True when another channel still uses this camera's connection (then it must not be logged out).
+pub(crate) async fn connection_shared(camera_config: &CameraConfig, camera: &std::sync::Arc<BcCamera>) -> bool {
+    let list = shared_list(camera_config);
+    let list = list.lock().await;
+    let me = std::sync::Arc::as_ptr(camera);
+    list.iter()
+        .filter_map(|w| w.upgrade())
+        .any(|c| std::sync::Arc::as_ptr(&c) != me)
+}
+
 pub(crate) async fn connect_and_login(camera_config: &CameraConfig) -> Result<BcCamera> {
     let camera_addr = AddressOrUid::new(
         &camera_config.camera_addr,

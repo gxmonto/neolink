@@ -72,7 +72,7 @@ pub struct BcCamera {
     channel_id: u8,
     connection: Arc<BcConnection>,
     logged_in: AtomicBool,
-    message_num: AtomicU16,
+    message_num: Arc<AtomicU16>, // shared by sibling handles on the same connection
     // Certain commands such as logout require the username/pass in plain text.... why....???
     credentials: Credentials,
     abilities: RwLock<HashMap<String, ReadKind>>,
@@ -357,7 +357,7 @@ impl BcCamera {
         trace!("Success");
         let me = Self {
             connection: Arc::new(conn),
-            message_num: AtomicU16::new(0),
+            message_num: Arc::new(AtomicU16::new(0)),
             channel_id: options.channel_id,
             logged_in: AtomicBool::new(false),
             credentials: Credentials::new(username, passwd),
@@ -366,6 +366,24 @@ impl BcCamera {
         };
         me.keepalive().await?;
         Ok(me)
+    }
+
+    /// Another handle on the same connection and login, for another channel of an NVR.
+    ///
+    /// Reolink recorders cap client sessions (~10 on an RLN16-410), so one login per channel does not scale;
+    /// the official client multiplexes every channel over one login, which this mirrors. Message numbers are
+    /// shared so replies on the common connection cannot collide.
+    pub async fn sibling(&self, channel_id: u8) -> Self {
+        let abilities = self.abilities.read().await.clone();
+        Self {
+            channel_id,
+            connection: self.connection.clone(),
+            logged_in: AtomicBool::new(self.logged_in.load(Ordering::Relaxed)),
+            message_num: self.message_num.clone(),
+            credentials: self.credentials.clone(),
+            abilities: RwLock::new(abilities),
+            cancel: CancellationToken::new(),
+        }
     }
 
     /// This method will get a new message number and increment the message count atomically
