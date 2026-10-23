@@ -257,7 +257,7 @@ pub(super) async fn make_factory(
                         // This is not an async thread
                         std::thread::spawn(move || {
                             let mut aud_ts = 0u32;
-                            let mut vid_ts = 0u32;
+                            let mut vid_ts = (0u64, None::<u32>); // (output µs, last camera frame clock)
                             let mut pools = Default::default();
 
                             log::trace!("{name}::{stream}: Sending buffered frames");
@@ -333,7 +333,7 @@ fn send_to_sources(
     pools: &mut HashMap<usize, gstreamer::BufferPool>,
     vid_src: &Option<AppSrc>,
     aud_src: &Option<AppSrc>,
-    vid_ts: &mut u32,
+    vid_ts: &mut (u64, Option<u32>),
     aud_ts: &mut u32,
     stream_config: &StreamConfig,
 ) -> AnyResult<()> {
@@ -367,14 +367,21 @@ fn send_to_sources(
             }
             *aud_ts += duration;
         }
-        BcMedia::Iframe(BcMediaIframe { data, .. })
-        | BcMedia::Pframe(BcMediaPframe { data, .. }) => {
-            if let Some(vid_src) = vid_src.as_ref() {
-                log::trace!("Sending VID: {:?}", Duration::from_micros(*vid_ts as u64));
-                send_to_appsrc(vid_src, data, Duration::from_micros(*vid_ts as u64), pools)?;
-            }
+        BcMedia::Iframe(BcMediaIframe { data, microseconds, .. })
+        | BcMedia::Pframe(BcMediaPframe { data, microseconds, .. }) => {
+            // Step by the camera's own frame clock. A relay that cannot carry every frame delivers fewer than `fps`
+            // frames per second; stepping 1/fps per frame then made the video run up to 2x too fast (players ran dry
+            // and stuttered). Falls back to 1/fps when the clock jumps (u32 µs wrap, reconnect, bogus values).
             const MICROSECONDS: u32 = 1000000;
-            *vid_ts += MICROSECONDS / stream_config.fps;
+            if let Some(last) = vid_ts.1 {
+                let d = microseconds.wrapping_sub(last);
+                vid_ts.0 += if d > 0 && d < 5 * MICROSECONDS { d as u64 } else { (MICROSECONDS / stream_config.fps) as u64 };
+            }
+            vid_ts.1 = Some(microseconds);
+            if let Some(vid_src) = vid_src.as_ref() {
+                log::trace!("Sending VID: {:?}", Duration::from_micros(vid_ts.0));
+                send_to_appsrc(vid_src, data, Duration::from_micros(vid_ts.0), pools)?;
+            }
         }
         _ => {}
     }
